@@ -20,7 +20,7 @@ On first launch, grant **Accessibility** access (System Settings → Privacy & S
 ## Usage
 
 - **Click empty menu bar space:** hide or show icons
-- **Right-click empty menu bar space:** settings (auto-hide delay, launch at login, quit)
+- **Right-click empty menu bar space:** settings (launch at login, quit)
 - **⌘-drag icons** left of the divider to choose what gets hidden. Drag the divider all the way right to hide everything.
 
 The app is ad-hoc signed. If you rebuild it, macOS may reset the Accessibility permission, so toggle it off and on again.

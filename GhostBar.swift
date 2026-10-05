@@ -17,14 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let collapsedLength: CGFloat = 10_000
     private var isCollapsed = false
-    private var autoHideTimer: Timer?
     private var clickMonitor: Any?
 
+    // Where macOS remembers the user's ⌘-drag position for the divider. Growing
+    // the divider to collapsedLength makes the system re-lay out the bar, which
+    // can overwrite this, so we snapshot it and write it straight back.
+    private let dividerPositionKey = "NSStatusItem Preferred Position GhostBarDivider"
     private let defaults = UserDefaults.standard
-    private var autoHideSeconds: Int {
-        get { defaults.object(forKey: "autoHideSeconds") as? Int ?? 10 }
-        set { defaults.set(newValue, forKey: "autoHideSeconds") }
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Autosave name makes macOS remember where the user dragged the divider.
@@ -45,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Start collapsed shortly after launch so the bar has laid out first.
+        // After this, the bar only opens and closes when clicked.
         expand()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.collapse() }
     }
@@ -112,24 +112,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func collapse() {
-        autoHideTimer?.invalidate()
         isCollapsed = true
-        divider.length = collapsedLength
-        divider.button?.image = nil
+        withPinnedDividerPosition {
+            divider.length = collapsedLength
+            divider.button?.image = nil
+        }
     }
 
     private func expand() {
         isCollapsed = false
-        divider.length = NSStatusItem.variableLength
-        divider.button?.image = symbol("line.diagonal", size: 12)
-        scheduleAutoHide()
+        withPinnedDividerPosition {
+            divider.length = NSStatusItem.variableLength
+            divider.button?.image = symbol("line.diagonal", size: 12)
+        }
     }
 
-    private func scheduleAutoHide() {
-        autoHideTimer?.invalidate()
-        guard autoHideSeconds > 0 else { return }
-        autoHideTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(autoHideSeconds), repeats: false) { [weak self] _ in
-            self?.collapse()
+    // Reads the divider's remembered position, resizes it, then puts the
+    // position back — including once more after the bar has re-laid out.
+    private func withPinnedDividerPosition(_ resize: () -> Void) {
+        let saved = defaults.object(forKey: dividerPositionKey)
+        resize()
+        guard let saved else { return }
+        defaults.set(saved, forKey: dividerPositionKey)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.defaults.set(saved, forKey: self.dividerPositionKey)
         }
     }
 
@@ -146,18 +153,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(help2)
         menu.addItem(.separator())
 
-        let autoHide = NSMenuItem(title: "Auto-hide", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        for (label, secs) in [("Never", 0), ("After 5 seconds", 5), ("After 10 seconds", 10), ("After 30 seconds", 30), ("After 1 minute", 60)] {
-            let item = NSMenuItem(title: label, action: #selector(setAutoHide(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = secs
-            item.state = secs == autoHideSeconds ? .on : .off
-            sub.addItem(item)
-        }
-        autoHide.submenu = sub
-        menu.addItem(autoHide)
-
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -167,11 +162,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit GhostBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         menu.popUp(positioning: nil, at: point, in: nil)
-    }
-
-    @objc private func setAutoHide(_ sender: NSMenuItem) {
-        autoHideSeconds = sender.tag
-        if !isCollapsed { scheduleAutoHide() }
     }
 
     @objc private func toggleLoginItem() {
@@ -214,10 +204,13 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     struct Session {
         let id: String
         let state: State
-        let folder: String
+        let path: String   // project folder Claude is running in ("" if unknown)
+        var folder: String { path.isEmpty ? "Claude Code" : (path as NSString).lastPathComponent }
     }
 
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let cursorBundleID = "com.todesktop.230313mzl4w4u92"
+
+    private let item = NSStatusBar.system.statusItem(withLength: 0)
     private let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/sessions")
     private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/icon.png")
     // A "working" session silent this long probably crashed; stop showing it.
@@ -230,11 +223,29 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     override init() {
         super.init()
         item.autosaveName = "GhostBarClaude"
+        keepRightOfDivider()
         item.button?.target = self
         item.button?.action = #selector(clicked)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         refresh()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
+    }
+
+    // This icon reports what Claude is doing, so the divider must never hide
+    // it. macOS stores each item's spot as points from the right edge of the
+    // bar — smaller is further right — so anything at or past the divider's
+    // spot sits on the hidden side. Nudge it back, leaving a position the user
+    // dragged somewhere safe alone. Runs before the item is laid out.
+    private func keepRightOfDivider() {
+        let defaults = UserDefaults.standard
+        let dividerKey = "NSStatusItem Preferred Position GhostBarDivider"
+        let myKey = "NSStatusItem Preferred Position GhostBarClaude"
+        guard defaults.object(forKey: dividerKey) != nil else { return } // divider not placed yet
+        let divider = defaults.double(forKey: dividerKey)
+        let mine = defaults.object(forKey: myKey) != nil ? defaults.double(forKey: myKey) : Double.infinity
+        guard mine >= divider else { return }
+        defaults.set(max(divider - 24, 1), forKey: myKey) // one icon's width to the right
     }
 
     private func refresh() {
@@ -252,8 +263,8 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
             }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
             if state == .working, Date().timeIntervalSince(modified) > staleAfter { return nil }
-            let folder = lines.count > 1 ? (lines[1] as NSString).lastPathComponent : ""
-            return Session(id: url.lastPathComponent, state: state, folder: folder.isEmpty ? "Claude Code" : folder)
+            let path = lines.count > 1 ? lines[1] : ""
+            return Session(id: url.lastPathComponent, state: state, path: path)
         }
         render(sessions.map(\.state).max() ?? .idle)
     }
@@ -261,11 +272,15 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private func render(_ state: State) {
         guard state != shown else { return }
         shown = state
-        item.isVisible = state != .idle
+        // Never set isVisible = false: an item that leaves the bar comes back
+        // as the newest one, which lands it left of the divider and gets it
+        // hidden. A zero length is invisible but keeps its place.
+        item.length = state == .idle ? 0 : NSStatusItem.variableLength
         guard let button = item.button else { return }
         switch state {
         case .idle:
-            break
+            button.image = nil
+            button.toolTip = nil
         case .working:
             button.image = workingFrame()
             button.toolTip = "Claude is working…"
@@ -319,12 +334,24 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
         return image
     }
 
-    // Click shows which sessions are in which state; closing the menu clears "done".
+    // Left-click jumps to Cursor, at the project that most needs you.
+    // Right-click lists every session; pick one to open its project.
     @objc private func clicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            showSessions()
+        } else {
+            let order: [State] = [.attention, .done, .working]
+            let target = order.lazy.compactMap { st in self.sessions.first { $0.state == st } }.first
+            openInCursor(target?.path ?? "")
+            clearDone()
+        }
+    }
+
+    private func showSessions() {
         let menu = NSMenu()
         menu.delegate = self
-        let order: [State] = [.attention, .working, .done]
-        for state in order {
+        for state in [State.attention, .working, .done] {
             for s in sessions where s.state == state {
                 let label: String
                 switch state {
@@ -332,8 +359,9 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
                 case .working: label = "… \(s.folder) — working"
                 default: label = "✓ \(s.folder) — done"
                 }
-                let row = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-                row.isEnabled = false
+                let row = NSMenuItem(title: label, action: #selector(openSession(_:)), keyEquivalent: "")
+                row.target = self
+                row.representedObject = s.path
                 menu.addItem(row)
             }
         }
@@ -341,12 +369,32 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
         item.button?.performClick(nil)
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        item.menu = nil
+    @objc private func openSession(_ sender: NSMenuItem) {
+        openInCursor(sender.representedObject as? String ?? "")
+    }
+
+    // Opening a folder Cursor already has open just brings that window forward.
+    private func openInCursor(_ path: String) {
+        guard let cursor = NSWorkspace.shared.urlForApplication(withBundleIdentifier: cursorBundleID) else { return }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        if !path.isEmpty, FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: cursor, configuration: config)
+        } else {
+            NSWorkspace.shared.openApplication(at: cursor, configuration: config)
+        }
+    }
+
+    private func clearDone() {
         for s in sessions where s.state == .done {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent(s.id))
         }
         refresh()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        item.menu = nil
+        clearDone()
     }
 
     private func customDoneIcon() -> NSImage? {
