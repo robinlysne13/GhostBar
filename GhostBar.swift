@@ -11,6 +11,8 @@ import ApplicationServices
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    // Created first so it sits to the right of the divider and never gets hidden.
+    private let claude = ClaudeStatus()
     private let divider = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
     private let collapsedLength: CGFloat = 10_000
@@ -193,6 +195,171 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "GhostBar")?.withSymbolConfiguration(config)
         image?.isTemplate = true
+        return image
+    }
+}
+
+// MARK: - Claude Code status
+
+// Shows whether Claude Code is working, done, or waiting on you. Claude Code
+// hooks (claude-status.sh) write one file per session into
+// ~/.ghostbar/sessions; this polls that folder. The icon disappears entirely
+// when there's nothing to report.
+final class ClaudeStatus: NSObject, NSMenuDelegate {
+    enum State: Int, Comparable {
+        case idle, done, working, attention
+        static func < (a: State, b: State) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    struct Session {
+        let id: String
+        let state: State
+        let folder: String
+    }
+
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/sessions")
+    private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/icon.png")
+    // A "working" session silent this long probably crashed; stop showing it.
+    private let staleAfter: TimeInterval = 60 * 60
+    private var sessions: [Session] = []
+    private var shown: State?
+    private var animation: Timer?
+    private let animationStart = Date()
+
+    override init() {
+        super.init()
+        item.autosaveName = "GhostBarClaude"
+        item.button?.target = self
+        item.button?.action = #selector(clicked)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        refresh()
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
+    }
+
+    private func refresh() {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        sessions = files.compactMap { url in
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            let state: State
+            switch lines.first {
+            case "working": state = .working
+            case "done": state = .done
+            case "attention": state = .attention
+            default: state = .idle
+            }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if state == .working, Date().timeIntervalSince(modified) > staleAfter { return nil }
+            let folder = lines.count > 1 ? (lines[1] as NSString).lastPathComponent : ""
+            return Session(id: url.lastPathComponent, state: state, folder: folder.isEmpty ? "Claude Code" : folder)
+        }
+        render(sessions.map(\.state).max() ?? .idle)
+    }
+
+    private func render(_ state: State) {
+        guard state != shown else { return }
+        shown = state
+        item.isVisible = state != .idle
+        guard let button = item.button else { return }
+        switch state {
+        case .idle:
+            break
+        case .working:
+            button.image = workingFrame()
+            button.toolTip = "Claude is working…"
+        case .done:
+            button.image = customDoneIcon() ?? symbol("checkmark.circle", color: .systemGreen)
+            button.toolTip = "Claude is done"
+        case .attention:
+            button.image = symbol("exclamationmark.circle", color: .systemOrange)
+            button.toolTip = "Claude needs you"
+        }
+        animate(state == .working)
+    }
+
+    // MARK: Working animation
+
+    private func animate(_ on: Bool) {
+        animation?.invalidate()
+        animation = nil
+        guard on else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.item.button?.image = self.workingFrame()
+        }
+        RunLoop.main.add(timer, forMode: .common) // keep animating while a menu is open
+        animation = timer
+    }
+
+    // The same outline circle as the other icons, with three dots that hop
+    // up one after another like a wave.
+    private func workingFrame() -> NSImage? {
+        guard let circle = symbol("circle", color: nil) else { return nil }
+        let size = circle.size
+        let t = Date().timeIntervalSince(animationStart)
+        let period = 1.5, hopLength = 0.5, stagger = 0.18
+        let image = NSImage(size: size, flipped: false) { rect in
+            circle.draw(in: rect)
+            NSColor.black.setFill() // template image: only the alpha matters
+            let d = size.width * 0.125
+            let spacing = size.width * 0.23
+            for i in 0..<3 {
+                let u = (t - Double(i) * stagger).truncatingRemainder(dividingBy: period)
+                let phase = u < 0 ? u + period : u
+                let hop = phase < hopLength ? sin(.pi * phase / hopLength) : 0
+                let x = rect.midX + CGFloat(i - 1) * spacing - d / 2
+                let y = rect.midY - d / 2 + CGFloat(hop) * size.height * 0.15
+                NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    // Click shows which sessions are in which state; closing the menu clears "done".
+    @objc private func clicked() {
+        let menu = NSMenu()
+        menu.delegate = self
+        let order: [State] = [.attention, .working, .done]
+        for state in order {
+            for s in sessions where s.state == state {
+                let label: String
+                switch state {
+                case .attention: label = "⚠︎ \(s.folder) — needs you"
+                case .working: label = "… \(s.folder) — working"
+                default: label = "✓ \(s.folder) — done"
+                }
+                let row = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+                row.isEnabled = false
+                menu.addItem(row)
+            }
+        }
+        item.menu = menu
+        item.button?.performClick(nil)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        item.menu = nil
+        for s in sessions where s.state == .done {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(s.id))
+        }
+        refresh()
+    }
+
+    private func customDoneIcon() -> NSImage? {
+        guard let image = NSImage(contentsOf: customIcon) else { return nil }
+        image.size = NSSize(width: 18, height: 18)
+        return image
+    }
+
+    private func symbol(_ name: String, color: NSColor?) -> NSImage? {
+        var config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        if let color { config = config.applying(.init(paletteColors: [color])) }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Claude status")?.withSymbolConfiguration(config)
+        image?.isTemplate = color == nil
         return image
     }
 }

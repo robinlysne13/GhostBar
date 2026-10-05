@@ -24,3 +24,28 @@ On first launch, grant **Accessibility** access (System Settings → Privacy & S
 - **⌘-drag icons** left of the divider to choose what gets hidden. Drag the divider all the way right to hide everything.
 
 The app is ad-hoc signed. If you rebuild it, macOS may reset the Accessibility permission, so toggle it off and on again.
+
+## Claude Code status icon
+
+![Working, done, needs you](icon-preview.gif)
+
+GhostBar can also show a small icon while Claude Code works in Cursor: animated dots while it's working, a green ✓ when it's done, and an orange ! when it needs you. The icon disappears when there's nothing to report. Click it to see each session's project and clear the ✓.
+
+Setup:
+
+```bash
+mkdir -p ~/.ghostbar && cp claude-status.sh ~/.ghostbar/
+```
+
+Then add these hooks to `~/.claude/settings.json`:
+
+```json
+"hooks": {
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh working 2>/dev/null || true", "timeout": 5 }] }],
+  "Stop":             [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh done 2>/dev/null || true", "timeout": 5 }] }],
+  "Notification":     [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh attention 2>/dev/null || true", "timeout": 5 }] }],
+  "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh end 2>/dev/null || true", "timeout": 5 }] }]
+}
+```
+
+The script only reports sessions running in Cursor. Delete the `__CFBundleIdentifier` line in it to report every session. To use your own image for "done", save it as `~/.ghostbar/icon.png`. If the icon gets hidden when the bar collapses, ⌘-drag it to the right of the divider.
