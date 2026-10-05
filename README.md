@@ -29,7 +29,7 @@ The app is ad-hoc signed. If you rebuild it, macOS may reset the Accessibility p
 
 ![Working, done, needs you](icon-preview.gif)
 
-GhostBar can also show a small icon while Claude Code works in Cursor: animated dots while it's working, a green ✓ when it's done, and an orange ! when it needs you. The icon disappears when there's nothing to report. Click it to see each session's project and clear the ✓.
+GhostBar can also show a small icon while Claude Code works in Cursor: animated dots while it's working, a green ✓ when it's done, and an orange ! when it needs you. The icon disappears when there's nothing to report. Click it to jump to that project in Cursor (and clear the ✓). Right-click it to list every session and open any of them.
 
 Setup:
 
