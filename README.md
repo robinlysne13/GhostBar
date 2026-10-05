@@ -44,6 +44,7 @@ Then add these hooks to `~/.claude/settings.json`:
   "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh working 2>/dev/null || true", "timeout": 5 }] }],
   "Stop":             [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh done 2>/dev/null || true", "timeout": 5 }] }],
   "Notification":     [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh attention 2>/dev/null || true", "timeout": 5 }] }],
+  "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh working 2>/dev/null || true", "timeout": 5, "async": true }] }],
   "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "~/.ghostbar/claude-status.sh end 2>/dev/null || true", "timeout": 5 }] }]
 }
 ```

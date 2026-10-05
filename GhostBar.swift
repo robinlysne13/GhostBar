@@ -213,7 +213,7 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: 0)
     private let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/sessions")
     private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/icon.png")
-    // A "working" session silent this long probably crashed; stop showing it.
+    // Last resort for a session file with no pid to check; see refresh().
     private let staleAfter: TimeInterval = 60 * 60
     private var sessions: [Session] = []
     private var shown: State?
@@ -261,12 +261,31 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
             case "attention": state = .attention
             default: state = .idle
             }
+            // A session that quit without running its SessionEnd hook — Cursor
+            // closed, a crash — would otherwise sit in the bar forever asking
+            // for help nobody can give. Its file names the Claude process that
+            // wrote it, so a dead owner means the file can go.
+            let pid = lines.count > 2 ? pid_t(lines[2]) ?? 0 : 0
+            if pid != 0, !isClaudeRunning(pid) {
+                try? fm.removeItem(at: url)
+                return nil
+            }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            if state == .working, Date().timeIntervalSince(modified) > staleAfter { return nil }
+            // Fallback for files written before the pid was recorded.
+            if pid == 0, state != .done, Date().timeIntervalSince(modified) > staleAfter { return nil }
             let path = lines.count > 1 ? lines[1] : ""
             return Session(id: url.lastPathComponent, state: state, path: path)
         }
         render(sessions.map(\.state).max() ?? .idle)
+    }
+
+    // True while that pid is still a Claude Code process. The name check keeps a
+    // recycled pid from passing for the session that first claimed it.
+    private func isClaudeRunning(_ pid: pid_t) -> Bool {
+        guard pid > 1 else { return false }
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
+        return String(cString: path).contains("claude")
     }
 
     private func render(_ state: State) {
