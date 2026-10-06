@@ -210,7 +210,7 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
 
     private let cursorBundleID = "com.todesktop.230313mzl4w4u92"
 
-    private let item = NSStatusBar.system.statusItem(withLength: 0)
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/sessions")
     private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/icon.png")
     // Last resort for a session file with no pid to check; see refresh().
@@ -219,6 +219,10 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private var shown: State?
     private var animation: Timer?
     private let animationStart = Date()
+    private let defaults = UserDefaults.standard
+    private let positionKey = "NSStatusItem Preferred Position GhostBarClaude"
+    // Where the item sat before it left the bar, so it can go back there.
+    private var savedPosition: Double?
 
     override init() {
         super.init()
@@ -238,14 +242,12 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     // spot sits on the hidden side. Nudge it back, leaving a position the user
     // dragged somewhere safe alone. Runs before the item is laid out.
     private func keepRightOfDivider() {
-        let defaults = UserDefaults.standard
         let dividerKey = "NSStatusItem Preferred Position GhostBarDivider"
-        let myKey = "NSStatusItem Preferred Position GhostBarClaude"
         guard defaults.object(forKey: dividerKey) != nil else { return } // divider not placed yet
         let divider = defaults.double(forKey: dividerKey)
-        let mine = defaults.object(forKey: myKey) != nil ? defaults.double(forKey: myKey) : Double.infinity
+        let mine = defaults.object(forKey: positionKey) != nil ? defaults.double(forKey: positionKey) : Double.infinity
         guard mine >= divider else { return }
-        defaults.set(max(divider - 24, 1), forKey: myKey) // one icon's width to the right
+        defaults.set(max(divider - 24, 1), forKey: positionKey) // one icon's width to the right
     }
 
     private func refresh() {
@@ -291,10 +293,7 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private func render(_ state: State) {
         guard state != shown else { return }
         shown = state
-        // Never set isVisible = false: an item that leaves the bar comes back
-        // as the newest one, which lands it left of the divider and gets it
-        // hidden. A zero length is invisible but keeps its place.
-        item.length = state == .idle ? 0 : NSStatusItem.variableLength
+        setVisible(state != .idle)
         guard let button = item.button else { return }
         switch state {
         case .idle:
@@ -311,6 +310,30 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
             button.toolTip = "Claude needs you"
         }
         animate(state == .working)
+    }
+
+    // macOS holds a status item to about 16pt even at zero length, so an idle
+    // icon still leaves a gap and pushes every icon left of it along. Taking
+    // the item out of the bar is the only way to give that space back. The
+    // catch is that an item which leaves comes back as the newest one, at the
+    // left end — the side the divider hides — so its remembered spot has to go
+    // back with it, and again after the bar re-lays out and overwrites it.
+    private func setVisible(_ visible: Bool) {
+        guard item.isVisible != visible else { return }
+        guard visible else {
+            savedPosition = defaults.object(forKey: positionKey) as? Double
+            item.isVisible = false
+            return
+        }
+        item.isVisible = true
+        if let savedPosition {
+            defaults.set(savedPosition, forKey: positionKey)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.defaults.set(savedPosition, forKey: self.positionKey)
+            }
+        }
+        keepRightOfDivider()
     }
 
     // MARK: Working animation
