@@ -215,6 +215,9 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".perch/icon.png")
     // Last resort for a session file with no pid to check; see refresh().
     private let staleAfter: TimeInterval = 60 * 60
+    // How long a "working" session may go quiet before Perch stops believing
+    // it; see refresh().
+    private let workingStale: TimeInterval = 5 * 60
     private var sessions: [Session] = []
     private var shown: State?
     private var animation: Timer?
@@ -273,8 +276,16 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
                 return nil
             }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let quiet = Date().timeIntervalSince(modified)
+            // Pressing esc ends the turn without running the Stop hook, so an
+            // interrupted session goes on claiming it is working while its
+            // process sits idle in Cursor — alive, so the pid check above keeps
+            // it. A session that really is working rewrites this file after
+            // every tool call, so a long silence means it stopped. If it was
+            // only a slow tool call, the next one brings the icon straight back.
+            if state == .working, quiet > workingStale { return nil }
             // Fallback for files written before the pid was recorded.
-            if pid == 0, state != .done, Date().timeIntervalSince(modified) > staleAfter { return nil }
+            if pid == 0, state != .done, quiet > staleAfter { return nil }
             let path = lines.count > 1 ? lines[1] : ""
             return Session(id: url.lastPathComponent, state: state, path: path)
         }
