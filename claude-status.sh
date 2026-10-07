@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Claude Code hook → GhostBar. Usage: claude-status.sh working|done|attention|end
-# Writes one file per session to ~/.ghostbar/sessions/<session_id>:
+# Claude Code hook → Perch. Usage: claude-status.sh working|done|attention|end
+# Writes one file per session to ~/.perch/sessions/<session_id>:
 #   line 1: state, line 2: project folder, line 3: pid of the Claude process
 
 # Only report sessions running inside Cursor (its extension panel or its
@@ -8,14 +8,14 @@
 # report every session.
 [[ "$__CFBundleIdentifier" == "com.todesktop.230313mzl4w4u92" ]] || exit 0
 
-dir="$HOME/.ghostbar/sessions"
+dir="$HOME/.perch/sessions"
 mkdir -p "$dir"
 input=$(cat)
 session=$(print -r -- "$input" | /usr/bin/jq -r '.session_id // empty')
 [[ -z "$session" ]] && exit 0
 file="$dir/$session"
 
-# The pid of the Claude process that owns this session, so GhostBar can drop a
+# The pid of the Claude process that owns this session, so Perch can drop a
 # session that quit without running its SessionEnd hook instead of leaving a
 # stale icon in the bar. The hook runs under a short-lived shell, so walk up the
 # parents until the claude binary itself turns up.

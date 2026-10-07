@@ -1,6 +1,6 @@
-// GhostBar — hides menu bar icons; click empty menu bar space to toggle.
+// Perch — hides menu bar icons; click empty menu bar space to toggle.
 //
-// How it works: GhostBar owns one status item, a thin divider. Any icon you
+// How it works: Perch owns one status item, a thin divider. Any icon you
 // ⌘-drag to the LEFT of the divider gets pushed off-screen when collapsed,
 // because the divider grows to a huge width and shoves everything to its left
 // out of view. A global mouse monitor watches for clicks on empty menu bar
@@ -22,12 +22,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Where macOS remembers the user's ⌘-drag position for the divider. Growing
     // the divider to collapsedLength makes the system re-lay out the bar, which
     // can overwrite this, so we snapshot it and write it straight back.
-    private let dividerPositionKey = "NSStatusItem Preferred Position GhostBarDivider"
+    private let dividerPositionKey = "NSStatusItem Preferred Position PerchDivider"
     private let defaults = UserDefaults.standard
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Autosave name makes macOS remember where the user dragged the divider.
-        divider.autosaveName = "GhostBarDivider"
+        divider.autosaveName = "PerchDivider"
         if let button = divider.button {
             button.target = self
             button.action = #selector(dividerClicked)
@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit GhostBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Perch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         menu.popUp(positioning: nil, at: point, in: nil)
     }
@@ -183,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func symbol(_ name: String, size: CGFloat) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "GhostBar")?.withSymbolConfiguration(config)
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Perch")?.withSymbolConfiguration(config)
         image?.isTemplate = true
         return image
     }
@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // Shows whether Claude Code is working, done, or waiting on you. Claude Code
 // hooks (claude-status.sh) write one file per session into
-// ~/.ghostbar/sessions; this polls that folder. The icon disappears entirely
+// ~/.perch/sessions; this polls that folder. The icon disappears entirely
 // when there's nothing to report.
 final class ClaudeStatus: NSObject, NSMenuDelegate {
     enum State: Int, Comparable {
@@ -211,8 +211,8 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private let cursorBundleID = "com.todesktop.230313mzl4w4u92"
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/sessions")
-    private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ghostbar/icon.png")
+    private let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".perch/sessions")
+    private let customIcon = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".perch/icon.png")
     // Last resort for a session file with no pid to check; see refresh().
     private let staleAfter: TimeInterval = 60 * 60
     private var sessions: [Session] = []
@@ -220,13 +220,13 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     private var animation: Timer?
     private let animationStart = Date()
     private let defaults = UserDefaults.standard
-    private let positionKey = "NSStatusItem Preferred Position GhostBarClaude"
+    private let positionKey = "NSStatusItem Preferred Position PerchClaude"
     // Where the item sat before it left the bar, so it can go back there.
     private var savedPosition: Double?
 
     override init() {
         super.init()
-        item.autosaveName = "GhostBarClaude"
+        item.autosaveName = "PerchClaude"
         keepRightOfDivider()
         item.button?.target = self
         item.button?.action = #selector(clicked)
@@ -242,7 +242,7 @@ final class ClaudeStatus: NSObject, NSMenuDelegate {
     // spot sits on the hidden side. Nudge it back, leaving a position the user
     // dragged somewhere safe alone. Runs before the item is laid out.
     private func keepRightOfDivider() {
-        let dividerKey = "NSStatusItem Preferred Position GhostBarDivider"
+        let dividerKey = "NSStatusItem Preferred Position PerchDivider"
         guard defaults.object(forKey: dividerKey) != nil else { return } // divider not placed yet
         let divider = defaults.double(forKey: dividerKey)
         let mine = defaults.object(forKey: positionKey) != nil ? defaults.double(forKey: positionKey) : Double.infinity

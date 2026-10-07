@@ -1,18 +1,18 @@
 #!/bin/zsh
-# Builds GhostBar.app next to this script.
+# Builds Perch.app next to this script.
 set -e
 cd "$(dirname "$0")"
-APP=GhostBar.app
+APP=Perch.app
 rm -rf $APP
 mkdir -p $APP/Contents/MacOS
-swiftc -O -swift-version 5 GhostBar.swift -o $APP/Contents/MacOS/GhostBar
+swiftc -O -swift-version 5 Perch.swift -o $APP/Contents/MacOS/Perch
 cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>GhostBar</string>
-  <key>CFBundleIdentifier</key><string>com.robin.ghostbar</string>
-  <key>CFBundleExecutable</key><string>GhostBar</string>
+  <key>CFBundleName</key><string>Perch</string>
+  <key>CFBundleIdentifier</key><string>com.robin.perch</string>
+  <key>CFBundleExecutable</key><string>Perch</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>
